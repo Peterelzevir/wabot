@@ -842,7 +842,7 @@ async function connectToWhatsApp() {
             // Help command
             case 'help':
             case 'menu':
-                const helpText = styles.title('ʀʏᴢᴇɴ ᴡʜᴀᴛsᴀᴘᴘ ʙᴏᴛ ᴍᴇɴᴜ') + '\n\n' +
+                const helpText = styles.title('ᴘᴇᴛ ᴡʜᴀᴛsᴀᴘᴘ ʙᴏᴛ ᴍᴇɴᴜ') + '\n\n' +
                                styles.section('𝗔𝗜 & 𝗜𝗺𝗮𝗴𝗲 𝗙𝗲𝗮𝘁𝘂𝗿𝗲𝘀') + '\n' +
                                styles.item('*.toanime* - Convert image to anime style') + '\n' +
                                styles.item('*.ds <prompt>* - Ask Deepseek AI') + '\n' +
