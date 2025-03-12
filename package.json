@@ -1,0 +1,75 @@
+{
+  "name": "ryzen-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "🤖 Advanced WhatsApp Bot with AI, stalking tools, and utility features",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "pm2": "pm2 start index.js --name 'ryzen-bot'",
+    "pm2:restart": "pm2 restart ryzen-bot",
+    "pm2:logs": "pm2 logs ryzen-bot",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "echo \"No tests available\" && exit 0",
+    "clean": "rm -rf auth_info/creds.json && echo 'Credentials cleared!'"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.5.0", 
+    "pino": "^8.15.0",
+    "axios": "^1.4.0",
+    "form-data": "^4.0.0",
+    "qrcode-terminal": "^0.12.0",
+    "chalk": "^4.1.2",
+    "fs-extra": "^11.1.1",
+    "moment-timezone": "^0.5.43",
+    "node-cache": "^5.1.2",
+    "node-fetch": "^2.6.12",
+    "pm2": "^5.3.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elzdev/ryzen-whatsapp-bot.git"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "ai",
+    "chatgpt",
+    "deepseek",
+    "qwen",
+    "crypto",
+    "stalk",
+    "youtube",
+    "transcript",
+    "simsimi",
+    "anime"
+  ],
+  "author": {
+    "name": "elz dev",
+    "email": "contact@elzdev.com",
+    "url": "https://elzdev.com"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/elzdev/ryzen-whatsapp-bot/issues"
+  },
+  "homepage": "https://github.com/elzdev/ryzen-whatsapp-bot#readme",
+  "nodemonConfig": {
+    "ignore": [
+      "auth_info/*",
+      "node_modules/*",
+      "temp.jpg"
+    ],
+    "delay": "2500"
+  }
+}
