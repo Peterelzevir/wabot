@@ -5,6 +5,7 @@ const pino = require('pino');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
+const crypto = require('crypto');
 
 // Bot configuration
 const prefix = '.'; // Command prefix
