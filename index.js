@@ -5,6 +5,8 @@ const pino = require('pino');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
+// Tambahkan baris ini untuk memperbaiki masalah crypto
+global.crypto = require('crypto').webcrypto;
 
 // Bot configuration
 const prefix = '.'; // Command prefix
