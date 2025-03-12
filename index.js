@@ -12,6 +12,21 @@ const ownerNumber = '6281280174445'; // Developer number
 const ownerName = 'elz dev'; // Developer name
 let simsimi = {}; // Store SimSimi status for each group
 
+// Store activity logs
+const activityLogs = [];
+const MAX_LOGS = 30; // Maximum number of logs to keep
+
+// Log activity function
+function logActivity(type, content) {
+    const timestamp = new Date().toLocaleString();
+    activityLogs.unshift({ type, content, timestamp });
+    
+    // Keep logs within limit
+    if (activityLogs.length > MAX_LOGS) {
+        activityLogs.pop();
+    }
+}
+
 // Fancy text styles for WhatsApp
 const styles = {
     title: (text) => `*『 ${text} 』*`,
@@ -49,12 +64,14 @@ async function connectToWhatsApp() {
                 lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut);
                 
             console.log('Connection closed due to:', lastDisconnect.error);
+            logActivity('CONNECTION', `Connection closed: ${lastDisconnect.error?.output?.payload?.message || 'Unknown error'}`);
             
             if (shouldReconnect) {
                 connectToWhatsApp();
             }
         } else if (connection === 'open') {
             console.log('Bot is now connected!');
+            logActivity('CONNECTION', 'Bot successfully connected');
         }
     });
     
@@ -97,9 +114,11 @@ async function connectToWhatsApp() {
                 
                 if (simResponse.data && simResponse.data.message) {
                     await sock.sendMessage(from, { text: simResponse.data.message }, { quoted: msg });
+                    logActivity('SIMSIMI', `Response sent in ${isGroup ? groupName : 'private chat'}`);
                 }
             } catch (error) {
                 console.error('SimSimi error:', error);
+                logActivity('ERROR', `SimSimi error: ${error.message}`);
             }
             return;
         }
@@ -111,6 +130,7 @@ async function connectToWhatsApp() {
         const command = args.shift().toLowerCase();
         
         console.log(`Command: ${command}, Args: ${args.join(' ')}`);
+        logActivity('COMMAND', `${senderName} (${sender.split('@')[0]}) used ${command} command`);
         
         // Command handler
         switch(command) {
@@ -164,14 +184,17 @@ async function connectToWhatsApp() {
                                          styles.bullet(`${targetName}`) + '\n\n' +
                                          '_Profile picture fetched successfully_ ✓'
                             }, { quoted: msg });
+                            logActivity('GET', `Profile picture fetched for ${targetName}`);
                         } catch (err) {
                             // If no profile picture available
                             await sock.sendMessage(from, { 
                                 text: styles.error + ' _No profile picture found_\n\n_This user/group might be using the default profile picture_ 🖼️'
                             }, { quoted: msg });
+                            logActivity('GET', `No profile picture found for ${targetName}`);
                         }
                     } catch (error) {
                         console.error('Get Photo error:', error);
+                        logActivity('ERROR', `Get Photo error: ${error.message}`);
                         await sock.sendMessage(from, { 
                             text: styles.error + ' _Failed to fetch profile picture_\n\n_Please try again later_ ⚠️' 
                         }, { quoted: msg });
@@ -198,6 +221,7 @@ async function connectToWhatsApp() {
                                              '_Group information fetched successfully_ ✓';
                             
                             await sock.sendMessage(from, { text: infoText }, { quoted: msg });
+                            logActivity('GET', `Group info fetched for ${groupName}`);
                         } 
                         // If replying to a message, get that user's info
                         else if (quotedSender) {
@@ -224,6 +248,7 @@ async function connectToWhatsApp() {
                                              '_User information fetched successfully_ ✓';
                             
                             await sock.sendMessage(from, { text: infoText }, { quoted: msg });
+                            logActivity('GET', `User info fetched for ${userName}`);
                         }
                         // If in private chat
                         else {
@@ -241,9 +266,11 @@ async function connectToWhatsApp() {
                                              '_User information fetched successfully_ ✓';
                             
                             await sock.sendMessage(from, { text: infoText }, { quoted: msg });
+                            logActivity('GET', `User info fetched for ${senderName}`);
                         }
                     } catch (error) {
                         console.error('Get Info error:', error);
+                        logActivity('ERROR', `Get Info error: ${error.message}`);
                         await sock.sendMessage(from, { 
                             text: styles.error + ' _Failed to fetch information_\n\n_Please try again later_ ⚠️' 
                         }, { quoted: msg });
@@ -294,11 +321,13 @@ async function connectToWhatsApp() {
                             image: { url: animeResponse.data.url || animeResponse.data },
                             caption: styles.title('ᴀɴɪᴍᴇ ᴄᴏɴᴠᴇʀsɪᴏɴ') + '\n\n' + styles.success + ' _Transformation completed successfully!_\n\n_Powered by AI technology_ ✨'
                         }, { quoted: msg });
+                        logActivity('ANIME', `Image converted to anime style for ${senderName}`);
                         
                         // Clean up
                         fs.unlinkSync('./temp.jpg');
                     } catch (error) {
                         console.error('Image to Anime error:', error);
+                        logActivity('ERROR', `Image to Anime error: ${error.message}`);
                         await sock.sendMessage(from, { text: styles.error + ' _Failed to convert image_\n\n_Please try again or use another image._ 📸' }, { quoted: msg });
                     }
                 } else {
@@ -330,11 +359,13 @@ async function connectToWhatsApp() {
                                           '_Data fetched successfully_ ✓';
                                           
                         await sock.sendMessage(from, { text: mlProfile }, { quoted: msg });
+                        logActivity('ML', `Mobile Legends profile fetched for ID: ${mlUserId}:${mlZoneId}`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _Profile not found_\n\n_Please check your User ID and Zone ID_ 🔍' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('ML Profile error:', error);
+                    logActivity('ERROR', `ML Profile error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to fetch profile_\n\n_Server might be busy, please try again later_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -390,11 +421,13 @@ async function connectToWhatsApp() {
                         } else {
                             await sock.sendMessage(from, { text: ffProfile }, { quoted: msg });
                         }
+                        logActivity('FF', `Free Fire profile fetched for ID: ${ffUserId}`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _Profile not found_\n\n_Check your ID and try again_ 🔍' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('FF Profile error:', error);
+                    logActivity('ERROR', `FF Profile error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to fetch profile_\n\n_Server might be busy, please try again later_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -436,11 +469,13 @@ async function connectToWhatsApp() {
                             image: { url: ttData.avatar },
                             caption: ttProfile
                         }, { quoted: msg });
+                        logActivity('TIKTOK', `TikTok profile fetched for @${ttUsername}`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _Profile not found_\n\n_Check the username and try again_ 🔍' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('TikTok Profile error:', error);
+                    logActivity('ERROR', `TikTok Profile error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to fetch TikTok profile_\n\n_The username might be invalid or server is busy_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -468,11 +503,13 @@ async function connectToWhatsApp() {
                                           `${dsResponse.data.answer}`;
                         
                         await sock.sendMessage(from, { text: aiResponse }, { quoted: msg });
+                        logActivity('AI', `Deepseek AI query processed: "${dsPrompt.substring(0, 30)}..."`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _No response from AI_\n\n_Please try again with a different prompt_ 🤖' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('Deepseek AI error:', error);
+                    logActivity('ERROR', `Deepseek AI error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to get AI response_\n\n_The AI service might be busy, please try again later_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -500,11 +537,13 @@ async function connectToWhatsApp() {
                                           `${qwResponse.data.answer}`;
                         
                         await sock.sendMessage(from, { text: aiResponse }, { quoted: msg });
+                        logActivity('AI', `Qwen AI query processed: "${qwPrompt.substring(0, 30)}..."`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _No response from AI_\n\n_Please try again with a different prompt_ 🤖' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('Qwen AI error:', error);
+                    logActivity('ERROR', `Qwen AI error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to get AI response_\n\n_The AI service might be busy, please try again later_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -532,11 +571,13 @@ async function connectToWhatsApp() {
                                           `${gptResponse.data.result}`;
                         
                         await sock.sendMessage(from, { text: aiResponse }, { quoted: msg });
+                        logActivity('AI', `ChatGPT query processed: "${gptPrompt.substring(0, 30)}..."`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _No response from ChatGPT_\n\n_Please try again with a different prompt_ 🤖' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('ChatGPT error:', error);
+                    logActivity('ERROR', `ChatGPT error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to get ChatGPT response_\n\n_The AI service might be busy, please try again later_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -572,11 +613,13 @@ async function connectToWhatsApp() {
                         searchResults += '_Search completed successfully_ ✓';
                         
                         await sock.sendMessage(from, { text: searchResults }, { quoted: msg });
+                        logActivity('SEARCH', `Google search query: "${searchQuery}"`);
                     } else {
                         await sock.sendMessage(from, { text: styles.error + ' _No search results found_\n\n_Try with different keywords_ 🔍' }, { quoted: msg });
                     }
                 } catch (error) {
                     console.error('Google Search error:', error);
+                    logActivity('ERROR', `Google Search error: ${error.message}`);
                     await sock.sendMessage(from, { text: styles.error + ' _Failed to search_\n\n_Google service might be busy, please try again later_ ⚠️' }, { quoted: msg });
                 }
                 break;
@@ -599,12 +642,179 @@ async function connectToWhatsApp() {
                 if (simCommand === 'on') {
                     simsimi[from] = true;
                     await sock.sendMessage(from, { text: styles.success + ' _SimSimi has been activated in this group!_\n\n_All messages will now get a response_ 🤖' }, { quoted: msg });
+                    logActivity('SIMSIMI', `SimSimi activated in ${groupName}`);
                 } else if (simCommand === 'off') {
                     simsimi[from] = false;
                     await sock.sendMessage(from, { text: styles.success + ' _SimSimi has been deactivated in this group_' }, { quoted: msg });
+                    logActivity('SIMSIMI', `SimSimi deactivated in ${groupName}`);
                 } else {
                     await sock.sendMessage(from, { text: styles.error + ' _Invalid option_\n\n_Use .sim on or .sim off_ ⚠️' }, { quoted: msg });
                 }
+                break;
+                
+            // Cryptocurrency Price Check
+            case 'cek':
+            case 'crypto':
+                if (args.length < 1) {
+                    await sock.sendMessage(from, { text: styles.warn + ' _Format: .crypto <symbol/name>_' }, { quoted: msg });
+                    break;
+                }
+                
+                const cryptoQuery = args.join(' ').toLowerCase();
+                
+                await sock.sendMessage(from, { text: styles.processing + '\n_Checking cryptocurrency price..._' }, { quoted: msg });
+                
+                try {
+                    // Call CoinGecko API to search for the crypto
+                    const searchResponse = await axios.get(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(cryptoQuery)}`);
+                    
+                    if (searchResponse.data && searchResponse.data.coins && searchResponse.data.coins.length > 0) {
+                        // Get the first (most relevant) result
+                        const coin = searchResponse.data.coins[0];
+                        
+                        // Get detailed price data for the coin
+                        const priceResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coin.id}&vs_currencies=usd,idr&include_24hr_change=true`);
+                        
+                        if (priceResponse.data && priceResponse.data[coin.id]) {
+                            const priceData = priceResponse.data[coin.id];
+                            const usdPrice = priceData.usd;
+                            const idrPrice = priceData.idr;
+                            const change24h = priceData.usd_24h_change ? priceData.usd_24h_change.toFixed(2) : 'N/A';
+                            const changeIcon = priceData.usd_24h_change >= 0 ? '↗️' : '↘️';
+                            
+                            const cryptoInfo = styles.title('ᴄʀʏᴘᴛᴏᴄᴜʀʀᴇɴᴄʏ ᴘʀɪᴄᴇ') + '\n\n' +
+                                             styles.result('𝗖𝗼𝗶𝗻') + '\n' +
+                                             styles.bullet(`${coin.name} (${coin.symbol.toUpperCase()})`) + '\n\n' +
+                                             styles.result('𝗣𝗿𝗶𝗰𝗲') + '\n' +
+                                             styles.bullet(`USD: $${usdPrice.toLocaleString()}`) + '\n' +
+                                             styles.bullet(`IDR: Rp${idrPrice.toLocaleString()}`) + '\n\n' +
+                                             styles.result('𝟮𝟰𝗵 𝗖𝗵𝗮𝗻𝗴𝗲') + '\n' +
+                                             styles.bullet(`${change24h}% ${changeIcon}`) + '\n\n' +
+                                             '_Data from CoinGecko_ ✓';
+                            
+                            await sock.sendMessage(from, { text: cryptoInfo }, { quoted: msg });
+                            logActivity('CRYPTO', `Cryptocurrency price checked for ${coin.name}`);
+                        } else {
+                            await sock.sendMessage(from, { text: styles.error + ' _Failed to fetch price data_\n\n_Please try again later_ ⚠️' }, { quoted: msg });
+                        }
+                    } else {
+                        // If no exact match found, suggest possible coins
+                        await sock.sendMessage(from, { 
+                            text: styles.error + ` _No cryptocurrency found with name/symbol "${cryptoQuery}"_\n\n` +
+                                  styles.subtitle('ᴘᴏssɪʙʟᴇ ᴍᴀᴛᴄʜᴇs') + '\n' +
+                                  (searchResponse.data.coins.length > 0 ? 
+                                      searchResponse.data.coins.slice(0, 3).map((c, i) => 
+                                          styles.bullet(`${c.name} (${c.symbol.toUpperCase()})`)
+                                      ).join('\n') : 
+                                      styles.bullet('No suggestions found')) + '\n\n' +
+                                  '_Try using the exact name or symbol_ 🔍'
+                        }, { quoted: msg });
+                    }
+                } catch (error) {
+                    console.error('Crypto price error:', error);
+                    logActivity('ERROR', `Crypto price error: ${error.message}`);
+                    await sock.sendMessage(from, { text: styles.error + ' _Failed to check cryptocurrency price_\n\n_The service might be busy, please try again later_ ⚠️' }, { quoted: msg });
+                }
+                break;
+
+            // YouTube Transcript
+            case 'transcript':
+            case 'tr':
+                if (args.length < 1) {
+                    await sock.sendMessage(from, { text: styles.warn + ' _Format: .transcript <YouTube URL>_' }, { quoted: msg });
+                    break;
+                }
+                
+                const youtubeUrl = args[0];
+                
+                // Basic URL validation
+                if (!youtubeUrl.includes('youtube.com/') && !youtubeUrl.includes('youtu.be/')) {
+                    await sock.sendMessage(from, { text: styles.error + ' _Invalid YouTube URL_\n\n_Please provide a valid YouTube video link_ 🔍' }, { quoted: msg });
+                    break;
+                }
+                
+                await sock.sendMessage(from, { text: styles.processing + '\n_Fetching video transcript..._' }, { quoted: msg });
+                
+                try {
+                    const transcriptResponse = await axios.get(`https://api.ryzendesu.vip/api/tool/yt-transcript?url=${encodeURIComponent(youtubeUrl)}`);
+                    
+                    if (transcriptResponse.data && transcriptResponse.data.status && transcriptResponse.data.transcript) {
+                        // Get video title if possible
+                        let videoTitle = '';
+                        try {
+                            const videoInfoResponse = await axios.get(`https://www.youtube.com/oembed?url=${encodeURIComponent(youtubeUrl)}&format=json`);
+                            if (videoInfoResponse.data && videoInfoResponse.data.title) {
+                                videoTitle = videoInfoResponse.data.title;
+                            }
+                        } catch (error) {
+                            // If we can't get the title, just continue without it
+                            console.error('YouTube title fetch error:', error);
+                        }
+                        
+                        // Clean up and format the transcript
+                        let transcript = transcriptResponse.data.transcript.trim();
+                        
+                        // Limit length to avoid message issues
+                        const maxLength = 3500;
+                        let isTruncated = false;
+                        
+                        if (transcript.length > maxLength) {
+                            transcript = transcript.substring(0, maxLength);
+                            isTruncated = true;
+                            
+                            // Try to find the last complete sentence
+                            const lastPeriod = transcript.lastIndexOf('.');
+                            const lastNewline = transcript.lastIndexOf('\n');
+                            const lastBreakpoint = Math.max(lastPeriod, lastNewline);
+                            
+                            if (lastBreakpoint > maxLength * 0.8) {
+                                transcript = transcript.substring(0, lastBreakpoint + 1);
+                            }
+                        }
+                        
+                        const formattedTranscript = styles.title('ʏᴏᴜᴛᴜʙᴇ ᴛʀᴀɴsᴄʀɪᴘᴛ') + '\n\n' +
+                                                 (videoTitle ? styles.subtitle('ᴠɪᴅᴇᴏ ᴛɪᴛʟᴇ') + '\n' + 
+                                                 styles.bullet(`${videoTitle}`) + '\n\n' : '') +
+                                                 styles.subtitle('ᴛʀᴀɴsᴄʀɪᴘᴛ') + '\n' +
+                                                 transcript + 
+                                                 (isTruncated ? '\n\n' + styles.warn + ' _Transcript truncated due to length..._' : '') + '\n\n' +
+                                                 '_Transcript fetched successfully_ ✓';
+                        
+                        await sock.sendMessage(from, { text: formattedTranscript }, { quoted: msg });
+                        logActivity('TRANSCRIPT', `YouTube transcript fetched for video: ${videoTitle || youtubeUrl}`);
+                    } else {
+                        await sock.sendMessage(from, { text: styles.error + ' _No transcript available for this video_\n\n_The video might not have captions or subtitles_ 📝' }, { quoted: msg });
+                    }
+                } catch (error) {
+                    console.error('YouTube transcript error:', error);
+                    logActivity('ERROR', `YouTube transcript error: ${error.message}`);
+                    await sock.sendMessage(from, { text: styles.error + ' _Failed to fetch transcript_\n\n_The service might be busy or the video doesn\'t have captions_ ⚠️' }, { quoted: msg });
+                }
+                break;
+
+            // View Bot Logs
+            case 'logs':
+                // Check if sender is the bot owner
+                if (sender !== ownerNumber + '@s.whatsapp.net') {
+                    await sock.sendMessage(from, { text: styles.error + ' _Only the bot owner can view logs_' }, { quoted: msg });
+                    break;
+                }
+                
+                const logEntries = activityLogs.slice(0, 15); // Show last 15 logs
+                let logText = styles.title('ʙᴏᴛ ᴀᴄᴛɪᴠɪᴛʏ ʟᴏɢs') + '\n\n';
+                
+                if (logEntries.length === 0) {
+                    logText += styles.bullet('No recent activity logs.');
+                } else {
+                    logEntries.forEach((log, index) => {
+                        logText += styles.result(`${index + 1}. [${log.type}]`) + '\n';
+                        logText += styles.bullet(`${log.timestamp}: ${log.content}`) + '\n\n';
+                    });
+                }
+                
+                logText += styles.footer('End of logs');
+                
+                await sock.sendMessage(from, { text: logText }, { quoted: msg });
                 break;
                 
             // Developer contact
@@ -624,6 +834,7 @@ async function connectToWhatsApp() {
                     },
                     caption: styles.title('ᴅᴇᴠᴇʟᴏᴘᴇʀ ᴄᴏɴᴛᴀᴄᴛ') + '\n\n_Contact saved as "elz dev"_\n\n_For issues, requests or collaborations_ ✨'
                 }, { quoted: msg });
+                logActivity('DEV', `Developer contact shared with ${senderName}`);
                 break;
                 
             // Help command
@@ -644,16 +855,36 @@ async function connectToWhatsApp() {
                                styles.section('𝗨𝘁𝗶𝗹𝗶𝘁𝘆 𝗙𝗲𝗮𝘁𝘂𝗿𝗲𝘀') + '\n' +
                                styles.item('*.search <query>* - Google search') + '\n' +
                                styles.item('*.sim on/off* - Toggle SimSimi chat in groups') + '\n' +
+                               styles.item('*.crypto <symbol>* - Check cryptocurrency price') + '\n' +
+                               styles.item('*.tr <youtube-url>* - Get YouTube transcript') + '\n' +
                                styles.item('*.get foto* - Get profile picture') + '\n' +
-                               styles.item('*.get info* - Get user/group info') + '\n' +
+                               styles.item('*.get info* - Get user/group info') + '\n\n' +
+                               
+                               styles.section('𝗢𝘄𝗻𝗲𝗿 𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀') + '\n' +
+                               styles.item('*.logs* - View bot activity logs') + '\n' +
                                styles.item('*.dev* - Developer contact') + '\n\n' +
                                
                                styles.section('𝗕𝗼𝘁 𝗦𝘁𝗮𝘁𝘂𝘀') + '\n' +
                                styles.item(`Runtime: ${formatUptime(process.uptime())}`) + '\n' +
                                styles.item(`Prefix: ${prefix}`) + '\n' +
-                               styles.footer('Created with ♥ by elz');
+                               styles.footer('create by elz');
                 
-                await sock.sendMessage(from, { text: helpText }, { quoted: msg });
+                // Menu image URL - you can replace this with your own bot logo/image
+                const menuImageUrl = 'https://i.ibb.co.com/cctMqDP4/IMG-20250219-123928-101.jpg';
+                
+                try {
+                    // Send menu as image with caption
+                    await sock.sendMessage(from, { 
+                        image: { url: menuImageUrl },
+                        caption: helpText
+                    }, { quoted: msg });
+                    logActivity('HELP', `Help menu displayed with image for ${senderName}`);
+                } catch (error) {
+                    // Fallback to text-only if image fails
+                    console.error('Menu image error:', error);
+                    await sock.sendMessage(from, { text: helpText }, { quoted: msg });
+                    logActivity('HELP', `Help menu displayed (text-only) for ${senderName} due to image error`);
+                }
                 break;
                 
             default:
