@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { proto, getContentType } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
@@ -12,7 +12,7 @@ global.crypto = require('crypto').webcrypto;
 // Bot configuration
 const prefix = '.'; // Command prefix
 const ownerNumber = '6281280174445'; // Developer number
-const ownerName = 'elz lov aca'; // Developer name
+const ownerName = 'elz dev'; // Developer name
 let simsimi = {}; // Store SimSimi status for each group
 
 // Bot state management
@@ -29,6 +29,7 @@ let botState = {
 const tempDownloadData = {};
 const tempImagePrompts = {};
 const pdfConversionData = {};
+const pendingActions = {}; // Store pending user actions (replacing buttons)
 
 // Store activity logs
 const activityLogs = [];
@@ -82,8 +83,9 @@ const styles = {
     error: `✗ 𝙴𝚁𝚁𝙾𝚁`,
     warn: `⚠️ 𝚆𝙰𝚁𝙽𝙸𝙽𝙶`,
     wait: `⏳ 𝚆𝙰𝙸𝚃𝙸𝙽𝙶`,
-    offline: `🔴 𝙾𝙵𝙵𝙻𝙸𝙽𝙴`
-}
+    offline: `🔴 𝙾𝙵𝙵𝙻𝙸𝙽𝙴`,
+    option: (num, text) => `${num}. ${text}`
+};
 
 // Create necessary directories
 function ensureDirectoriesExist() {
@@ -281,10 +283,11 @@ async function connectToWhatsApp() {
             return;
         }
         
-        // Skip messages that aren't commands or if bot isn't ready
+        // Skip messages that aren't commands
         if (!body.startsWith(prefix)) return;
+        
+        // If bot isn't ready, let the user know (only for certain important commands)
         if (!isBotReady()) {
-            // If the bot isn't ready, let the user know (only for certain important commands)
             const importantCommands = ['help', 'menu', 'owner', 'dev'];
             const command = body.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
             
@@ -298,10 +301,11 @@ async function connectToWhatsApp() {
             return;
         }
         
-        // Check if user is in cooldown
+        // Extract command and arguments
         const args = body.slice(prefix.length).trim().split(/ +/);
         const command = args.shift().toLowerCase();
         
+        // Check if user is in cooldown
         const cooldownTime = 3000; // 3 seconds default cooldown
         const cooldownLeft = checkCooldown(sender, command, cooldownTime);
         
@@ -342,6 +346,189 @@ async function connectToWhatsApp() {
         if (msgType === 'extendedTextMessage' && msg.message.extendedTextMessage.contextInfo?.quotedMessage) {
             quotedMsg = msg.message.extendedTextMessage.contextInfo.quotedMessage;
             quotedSender = msg.message.extendedTextMessage.contextInfo.participant;
+        }
+        
+        // Check for pending actions (replacement for buttons)
+        if (pendingActions[sender]) {
+            const action = pendingActions[sender];
+            
+            // Media Downloader selection
+            if (action.type === 'downloader' && ['1', '2'].includes(command)) {
+                delete pendingActions[sender];
+                
+                if (command === '1') { // TikTok option selected
+                    await sock.sendMessage(from, { 
+                        text: styles.subtitle('ᴛɪᴋᴛᴏᴋ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
+                              styles.bullet('_Please send the TikTok video link_') + '\n\n' +
+                              styles.bullet('_Format: .ttdl [TikTok URL]_')
+                    }, { quoted: msg });
+                    logActivity('DOWN', `TikTok downloader selected by ${senderName}`);
+                    return;
+                }
+                else if (command === '2') { // Instagram option selected
+                    await sock.sendMessage(from, { 
+                        text: styles.subtitle('ɪɴsᴛᴀɢʀᴀᴍ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
+                              styles.bullet('_Please send the Instagram post link_') + '\n\n' +
+                              styles.bullet('_Format: .igdl [Instagram URL]_')
+                    }, { quoted: msg });
+                    logActivity('DOWN', `Instagram downloader selected by ${senderName}`);
+                    return;
+                }
+            }
+            
+            // TikTok download option selection
+            else if (action.type === 'tiktok_option' && ['1', '2'].includes(command)) {
+                if (!tempDownloadData[sender] || tempDownloadData[sender].type !== 'tiktok') {
+                    await sock.sendMessage(from, { 
+                        text: styles.error + ' _TikTok data expired_\n\n_Please start over with .ttdl [URL]_'
+                    }, { quoted: msg });
+                    delete pendingActions[sender];
+                    return;
+                }
+                
+                const data = tempDownloadData[sender].data;
+                delete pendingActions[sender];
+                
+                if (command === '1') { // HD Video
+                    await sock.sendMessage(from, { text: styles.processing + '\n_Downloading HD video..._' }, { quoted: msg });
+                    
+                    try {
+                        await sock.sendMessage(from, { 
+                            video: { url: data.hdplay },
+                            caption: styles.title('ᴛɪᴋᴛᴏᴋ ᴠɪᴅᴇᴏ') + '\n\n' +
+                                    styles.subtitle(data.title) + '\n\n' +
+                                    styles.bullet(`👤 Creator: ${data.author.nickname}`) + '\n' +
+                                    styles.bullet(`👁️ Views: ${data.play_count.toLocaleString()}`) + '\n' +
+                                    styles.bullet(`❤️ Likes: ${data.digg_count.toLocaleString()}`) + '\n\n' +
+                                    '_Download completed successfully_ ✓',
+                            mimetype: 'video/mp4'
+                        }, { quoted: msg });
+                        logActivity('DOWN', `TikTok video downloaded for ${senderName}`);
+                        
+                        // Clear temp data
+                        delete tempDownloadData[sender];
+                    } catch (error) {
+                        console.error('TikTok video download error:', error);
+                        logActivity('ERROR', `TikTok download error: ${error.message}`);
+                        await sock.sendMessage(from, { 
+                            text: styles.error + ' _Failed to download video_\n\n_Please try again later_ ⚠️' 
+                        }, { quoted: msg });
+                    }
+                    return;
+                }
+                else if (command === '2') { // Audio
+                    await sock.sendMessage(from, { text: styles.processing + '\n_Extracting audio..._' }, { quoted: msg });
+                    
+                    try {
+                        // If there are images, send them as slideshow with audio
+                        if (data.images && data.images.length > 0) {
+                            for (const image of data.images) {
+                                await sock.sendMessage(from, { 
+                                    image: { url: image.url },
+                                    caption: styles.title('ᴛɪᴋᴛᴏᴋ ɪᴍᴀɢᴇ')
+                                }, { quoted: msg });
+                            }
+                            
+                            await sock.sendMessage(from, { 
+                                audio: { url: data.music },
+                                mimetype: 'audio/mp4',
+                                ptt: false
+                            }, { quoted: msg });
+                        } else {
+                            // Just send the audio
+                            await sock.sendMessage(from, { 
+                                audio: { url: data.music },
+                                mimetype: 'audio/mp4',
+                                ptt: false
+                            }, { quoted: msg });
+                        }
+                        
+                        await sock.sendMessage(from, { 
+                            text: styles.title('ᴛɪᴋᴛᴏᴋ ᴀᴜᴅɪᴏ') + '\n\n' +
+                                  styles.subtitle(data.music_info.title) + '\n\n' +
+                                  styles.bullet(`👤 Creator: ${data.music_info.author}`) + '\n' +
+                                  styles.bullet(`🎵 Original: ${data.music_info.original ? 'Yes' : 'No'}`) + '\n\n' +
+                                  '_Audio extraction completed successfully_ ✓'
+                        }, { quoted: msg });
+                        logActivity('DOWN', `TikTok audio downloaded for ${senderName}`);
+                        
+                        // Clear temp data
+                        delete tempDownloadData[sender];
+                    } catch (error) {
+                        console.error('TikTok audio download error:', error);
+                        logActivity('ERROR', `TikTok audio download error: ${error.message}`);
+                        await sock.sendMessage(from, { 
+                            text: styles.error + ' _Failed to extract audio_\n\n_Please try again later_ ⚠️' 
+                        }, { quoted: msg });
+                    }
+                    return;
+                }
+            }
+            
+            // Image style selection
+            else if (action.type === 'image_style' && ['1', '2', '3', '4', '5', '6'].includes(command)) {
+                if (!tempImagePrompts[sender]) {
+                    await sock.sendMessage(from, { 
+                        text: styles.error + ' _Image prompt expired_\n\n_Please start over with .create [prompt]_'
+                    }, { quoted: msg });
+                    delete pendingActions[sender];
+                    return;
+                }
+                
+                const styleMap = {
+                    '1': 'Soft-Anime',
+                    '2': 'Vintage-Anime',
+                    '3': 'Waifu',
+                    '4': 'Anime',
+                    '5': 'Studio-Ghibli',
+                    '6': 'Cute-Anime'
+                };
+                
+                const selectedStyle = styleMap[command];
+                const prompt = tempImagePrompts[sender];
+                delete pendingActions[sender];
+                
+                await sock.sendMessage(from, { 
+                    text: styles.processing + '\n_Generating AI image with style: ' + selectedStyle + '..._\n\n' +
+                          styles.bullet('_This might take up to 30 seconds_')
+                }, { quoted: msg });
+                
+                try {
+                    const imageResponse = await axios.get(`https://api.ryzendesu.vip/api/ai/waifu-diff?prompt=${encodeURIComponent(prompt)}&style=${encodeURIComponent(selectedStyle)}`, {
+                        responseType: 'arraybuffer'
+                    });
+                    
+                    // Create a unique filename to avoid conflicts
+                    const imagePath = `./temp/img_${sender.split('@')[0]}_${Date.now()}.png`;
+                    
+                    // Save image temporarily
+                    fs.writeFileSync(imagePath, Buffer.from(imageResponse.data));
+                    
+                    // Send the image
+                    await sock.sendMessage(from, { 
+                        image: { url: imagePath },
+                        caption: styles.title('ᴀɪ ɢᴇɴᴇʀᴀᴛᴇᴅ ɪᴍᴀɢᴇ') + '\n\n' +
+                                 styles.subtitle('ᴘʀᴏᴍᴘᴛ') + '\n' +
+                                 styles.bullet(`"${prompt}"`) + '\n\n' +
+                                 styles.subtitle('sᴛʏʟᴇ') + '\n' +
+                                 styles.bullet(`${selectedStyle}`) + '\n\n' +
+                                 styles.success + ' _Image generated successfully_ ✨'
+                    }, { quoted: msg });
+                    logActivity('CREATE', `AI image generated with style: ${selectedStyle}`);
+                    
+                    // Clean up
+                    fs.unlinkSync(imagePath);
+                    delete tempImagePrompts[sender];
+                } catch (error) {
+                    console.error('AI image generation error:', error);
+                    logActivity('ERROR', `AI image generation error: ${error.message}`);
+                    await sock.sendMessage(from, { 
+                        text: styles.error + ' _Failed to generate image_\n\n_The AI service might be busy or the prompt contains prohibited content. Please try again with a different prompt._ 🎨' 
+                    }, { quoted: msg });
+                    delete tempImagePrompts[sender];
+                }
+                return;
+            }
         }
         
         // Command handler
@@ -501,52 +688,39 @@ async function connectToWhatsApp() {
                                     (msg.message.extendedTextMessage && 
                                      msg.message.extendedTextMessage.contextInfo && 
                                      msg.message.extendedTextMessage.contextInfo.quotedMessage && 
-                                     (msg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage ||
-                                      msg.message.extendedTextMessage.contextInfo.quotedMessage.videoMessage ||
-                                      msg.message.extendedTextMessage.contextInfo.quotedMessage.documentMessage));
+                                     msg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage);
                     
                     if (hasImage) {
                         await sock.sendMessage(from, { text: styles.processing + '\n_Converting your image to anime style..._' }, { quoted: msg });
                         
                         try {
                             // Download image
-                            let mediaMsg = null;
-                            let isQuoted = false;
+                            let buffer;
                             
                             if (msg.message.imageMessage) {
-                                mediaMsg = msg;
-                            } else if (msg.message.extendedTextMessage && 
-                                       msg.message.extendedTextMessage.contextInfo && 
-                                       msg.message.extendedTextMessage.contextInfo.quotedMessage) {
-                                const quotedMsg = msg.message.extendedTextMessage.contextInfo;
-                                if (quotedMsg.quotedMessage.imageMessage) {
-                                    mediaMsg = {
-                                        key: {
-                                            remoteJid: from,
-                                            id: quotedMsg.stanzaId,
-                                            participant: quotedMsg.participant
-                                        },
-                                        message: quotedMsg.quotedMessage
-                                    };
-                                    isQuoted = true;
-                                }
+                                buffer = await downloadMediaMessage(
+                                    msg,
+                                    'buffer',
+                                    {},
+                                    { 
+                                        logger: pino({ level: 'silent' }),
+                                        reuploadRequest: sock.updateMediaMessage
+                                    }
+                                );
+                            } else {
+                                // Handle quoted image
+                                const quotedMsg = {
+                                    message: msg.message.extendedTextMessage.contextInfo.quotedMessage
+                                };
+                                buffer = await downloadMediaMessage(
+                                    quotedMsg,
+                                    'buffer',
+                                    {},
+                                    { 
+                                        logger: pino({ level: 'silent' })
+                                    }
+                                );
                             }
-                            
-                            if (!mediaMsg) {
-                                await sock.sendMessage(from, { text: styles.error + ' _Failed to process image. Please try again._' }, { quoted: msg });
-                                break;
-                            }
-                            
-                            // Download media
-                            const buffer = await downloadMediaMessage(
-                                mediaMsg,
-                                'buffer',
-                                {},
-                                { 
-                                    logger: pino({ level: 'silent' }),
-                                    reuploadRequest: sock.updateMediaMessage
-                                }
-                            );
                             
                             // Create temp directory if it doesn't exist
                             if (!fs.existsSync('./temp')) {
@@ -593,6 +767,349 @@ async function connectToWhatsApp() {
                     }
                     break;
                     
+                // Downloader - TikTok & Instagram
+                case 'down':
+                    // Using text-based menu instead of buttons
+                    const downMenu = styles.title('ᴍᴇᴅɪᴀ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
+                                     styles.subtitle('ᴄʜᴏᴏsᴇ ᴘʟᴀᴛғᴏʀᴍ') + '\n' +
+                                     styles.bullet('Reply with the number of your choice:') + '\n\n' +
+                                     styles.option('1', 'TikTok') + '\n' +
+                                     styles.option('2', 'Instagram') + '\n\n' +
+                                     styles.footer('Just send a number: 1 or 2');
+                    
+                    await sock.sendMessage(from, { text: downMenu }, { quoted: msg });
+                    
+                    // Store the action for later use
+                    pendingActions[sender] = {
+                        type: 'downloader',
+                        timestamp: Date.now()
+                    };
+                    
+                    logActivity('DOWN', `Downloader menu displayed for ${senderName}`);
+                    break;
+                
+                // TikTok Downloader
+                case 'tiktokdl':
+                case 'ttdl':
+                    if (args.length < 1) {
+                        await sock.sendMessage(from, { text: styles.warn + ' _Format: .tiktokdl [TikTok URL]_' }, { quoted: msg });
+                        break;
+                    }
+                    
+                    const ttUrl = args[0];
+                    
+                    // Validate TikTok URL
+                    if (!ttUrl.includes('tiktok.com/')) {
+                        await sock.sendMessage(from, { text: styles.error + ' _Invalid TikTok URL_\n\n_Please provide a valid TikTok link_ 🔍' }, { quoted: msg });
+                        break;
+                    }
+                    
+                    await sock.sendMessage(from, { text: styles.processing + '\n_Processing TikTok link..._' }, { quoted: msg });
+                    
+                    try {
+                        const ttResponse = await axios.get(`https://api.ryzendesu.vip/api/downloader/ttdl?url=${encodeURIComponent(ttUrl)}`);
+                        
+                        if (ttResponse.data && ttResponse.data.success && ttResponse.data.data && ttResponse.data.data.data) {
+                            const ttData = ttResponse.data.data.data;
+                            
+                            // Store data for selection
+                            tempDownloadData[sender] = {
+                                type: 'tiktok',
+                                data: ttData
+                            };
+                            
+                            // Text-based menu for download options
+                            const optionsMenu = styles.title('ᴛɪᴋᴛᴏᴋ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
+                                              styles.subtitle('ᴠɪᴅᴇᴏ ɪɴғᴏʀᴍᴀᴛɪᴏɴ') + '\n' +
+                                              styles.bullet(`Title: ${ttData.title}`) + '\n' +
+                                              styles.bullet(`Creator: ${ttData.author.nickname}`) + '\n' +
+                                              styles.bullet(`Duration: ${ttData.duration} seconds`) + '\n\n' +
+                                              styles.subtitle('ᴄʜᴏᴏsᴇ ᴏᴘᴛɪᴏɴ') + '\n' +
+                                              styles.bullet('Reply with the number of your choice:') + '\n\n' +
+                                              styles.option('1', 'Download HD Video') + '\n' +
+                                              styles.option('2', 'Extract Audio') + '\n\n' +
+                                              styles.footer('Just send a number: 1 or 2');
+                            
+                            await sock.sendMessage(from, { text: optionsMenu }, { quoted: msg });
+                            
+                            // Store the action for later processing
+                            pendingActions[sender] = {
+                                type: 'tiktok_option',
+                                timestamp: Date.now()
+                            };
+                            
+                            logActivity('DOWN', `TikTok link processed: ${ttUrl}`);
+                        } else {
+                            await sock.sendMessage(from, { text: styles.error + ' _Failed to process TikTok link_\n\n_The video might be private or deleted_ 🔍' }, { quoted: msg });
+                        }
+                    } catch (error) {
+                        console.error('TikTok processing error:', error);
+                        logActivity('ERROR', `TikTok processing error: ${error.message}`);
+                        await sock.sendMessage(from, { text: styles.error + ' _Failed to process TikTok link_\n\n_Server might be busy, please try again later_ ⚠️' }, { quoted: msg });
+                    }
+                    break;
+                
+                // Instagram Downloader
+                case 'instagram':
+                case 'ig':
+                case 'igdl':
+                    if (args.length < 1) {
+                        await sock.sendMessage(from, { text: styles.warn + ' _Format: .instagram [Instagram URL]_' }, { quoted: msg });
+                        break;
+                    }
+                    
+                    const igUrl = args[0];
+                    
+                    // Validate Instagram URL
+                    if (!igUrl.includes('instagram.com/')) {
+                        await sock.sendMessage(from, { text: styles.error + ' _Invalid Instagram URL_\n\n_Please provide a valid Instagram link_ 🔍' }, { quoted: msg });
+                        break;
+                    }
+                    
+                    await sock.sendMessage(from, { text: styles.processing + '\n_Processing Instagram link..._' }, { quoted: msg });
+                    
+                    try {
+                        const igResponse = await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(igUrl)}`);
+                        
+                        if (igResponse.data && igResponse.data.status && igResponse.data.data && igResponse.data.data.length > 0) {
+                            await sock.sendMessage(from, { text: styles.subtitle('ɪɴsᴛᴀɢʀᴀᴍ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' + 
+                                                          styles.bullet(`Found ${igResponse.data.data.length} media from post`) + '\n' +
+                                                          styles.bullet('_Downloading all media..._') }, { quoted: msg });
+                            
+                            // Download all media
+                            let counter = 0;
+                            for (const media of igResponse.data.data) {
+                                counter++;
+                                
+                                // Determine if it's a video or image by checking the URL
+                                const isVideo = media.url.includes('.mp4') || media.url.toLowerCase().includes('video');
+                                
+                                if (isVideo) {
+                                    await sock.sendMessage(from, { 
+                                        video: { url: media.url },
+                                        caption: styles.subtitle(`ɪɴsᴛᴀɢʀᴀᴍ ᴍᴇᴅɪᴀ ${counter}/${igResponse.data.data.length}`),
+                                        mimetype: 'video/mp4'
+                                    }, { quoted: msg });
+                                } else {
+                                    await sock.sendMessage(from, { 
+                                        image: { url: media.url },
+                                        caption: styles.subtitle(`ɪɴsᴛᴀɢʀᴀᴍ ᴍᴇᴅɪᴀ ${counter}/${igResponse.data.data.length}`)
+                                    }, { quoted: msg });
+                                }
+                                
+                                // Add a short delay between sending media to prevent rate limits
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            }
+                            
+                            await sock.sendMessage(from, { 
+                                text: styles.success + ` _Successfully downloaded ${igResponse.data.data.length} media from Instagram post_ ✓`
+                            }, { quoted: msg });
+                            logActivity('DOWN', `Instagram media downloaded: ${igUrl}`);
+                        } else {
+                            await sock.sendMessage(from, { text: styles.error + ' _Failed to process Instagram link_\n\n_The post might be private or deleted_ 🔍' }, { quoted: msg });
+                        }
+                    } catch (error) {
+                        console.error('Instagram processing error:', error);
+                        logActivity('ERROR', `Instagram processing error: ${error.message}`);
+                        await sock.sendMessage(from, { text: styles.error + ' _Failed to process Instagram link_\n\n_Server might be busy, please try again later_ ⚠️' }, { quoted: msg });
+                    }
+                    break;
+                
+                // AI Image Generator
+                case 'create':
+                    if (args.length < 1) {
+                        await sock.sendMessage(from, { text: styles.warn + ' _Format: .create [prompt]_' }, { quoted: msg });
+                        break;
+                    }
+                    
+                    const createPrompt = args.join(' ');
+                    
+                    // Store prompt for later use
+                    tempImagePrompts[sender] = createPrompt;
+                    
+                    // Text-based menu for style selection
+                    const styleMenu = styles.title('ᴀɪ ɪᴍᴀɢᴇ ɢᴇɴᴇʀᴀᴛᴏʀ') + '\n\n' +
+                                     styles.subtitle('ʏᴏᴜʀ ᴘʀᴏᴍᴘᴛ') + '\n' +
+                                     styles.bullet(`"${createPrompt}"`) + '\n\n' +
+                                     styles.subtitle('ᴄʜᴏᴏsᴇ sᴛʏʟᴇ') + '\n' +
+                                     styles.bullet('Reply with the number of your choice:') + '\n\n' +
+                                     styles.option('1', 'Soft-Anime') + '\n' +
+                                     styles.option('2', 'Vintage-Anime') + '\n' +
+                                     styles.option('3', 'Waifu') + '\n' +
+                                     styles.option('4', 'Anime') + '\n' +
+                                     styles.option('5', 'Studio-Ghibli') + '\n' +
+                                     styles.option('6', 'Cute-Anime') + '\n\n' +
+                                     styles.footer('Just send a number: 1-6');
+                    
+                    await sock.sendMessage(from, { text: styleMenu }, { quoted: msg });
+                    
+                    // Store the action for later processing
+                    pendingActions[sender] = {
+                        type: 'image_style',
+                        timestamp: Date.now()
+                    };
+                    
+                    logActivity('CREATE', `AI image prompt received: "${createPrompt.substring(0, 30)}..."`);
+                    break;
+                
+                // Text to PDF Converter
+                case 'topdf':
+                    // Make sure we're replying to a message
+                    if (!msg.message.extendedTextMessage || !msg.message.extendedTextMessage.contextInfo || !msg.message.extendedTextMessage.contextInfo.quotedMessage) {
+                        await sock.sendMessage(from, { 
+                            text: styles.warn + ' _Reply to a text message with .topdf command_\n\n' +
+                                  styles.bullet('_Example: .topdf_')
+                        }, { quoted: msg });
+                        break;
+                    }
+                    
+                    // Extract the text from the quoted message
+                    const quotedContent = msg.message.extendedTextMessage.contextInfo.quotedMessage;
+                    let textContent = '';
+                    
+                    if (quotedContent.conversation) {
+                        textContent = quotedContent.conversation;
+                    } else if (quotedContent.extendedTextMessage && quotedContent.extendedTextMessage.text) {
+                        textContent = quotedContent.extendedTextMessage.text;
+                    } else {
+                        await sock.sendMessage(from, { 
+                            text: styles.error + ' _The replied message must contain text_'
+                        }, { quoted: msg });
+                        break;
+                    }
+                    
+                    // Store the text content for later use
+                    pdfConversionData[sender] = textContent;
+                    
+                    // Ask for filename
+                    await sock.sendMessage(from, { 
+                        text: styles.title('ᴛᴇxᴛ ᴛᴏ ᴘᴅғ ᴄᴏɴᴠᴇʀᴛᴇʀ') + '\n\n' +
+                              styles.subtitle('ᴛᴇxᴛ ᴄᴀᴘᴛᴜʀᴇᴅ') + '\n' +
+                              styles.bullet(`${textContent.length} characters captured`) + '\n\n' +
+                              styles.subtitle('ғɪʟᴇɴᴀᴍᴇ') + '\n' +
+                              styles.bullet('_Reply with the filename you want (without .pdf extension)_') + '\n\n' +
+                              styles.bullet('_Format: .filename YourFileName_')
+                    }, { quoted: msg });
+                    logActivity('PDF', `Text to PDF conversion initiated by ${senderName}`);
+                    break;
+                
+                // Filename handler for PDF conversion
+                case 'filename':
+                    if (args.length < 1) {
+                        await sock.sendMessage(from, { 
+                            text: styles.warn + ' _Please provide a filename_\n\n' +
+                                  styles.bullet('_Format: .filename YourFileName_')
+                        }, { quoted: msg });
+                        break;
+                    }
+                    
+                    if (!pdfConversionData[sender]) {
+                        await sock.sendMessage(from, { 
+                            text: styles.error + ' _No text found for conversion_\n\n' +
+                                  styles.bullet('_First reply to a text message with .topdf command_')
+                        }, { quoted: msg });
+                        break;
+                    }
+                    
+                    const filename = args.join('_').replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const textToPDF = pdfConversionData[sender];
+                    
+                    await sock.sendMessage(from, { 
+                        text: styles.processing + '\n_Creating PDF document..._'
+                    }, { quoted: msg });
+                    
+                    try {
+                        // Create PDF
+                        const pdfPath = `./temp/${filename}.pdf`;
+                        const doc = new PDFDocument({
+                            margin: 50,
+                            size: 'A4'
+                        });
+                        
+                        // Pipe PDF to file
+                        const writeStream = fs.createWriteStream(pdfPath);
+                        doc.pipe(writeStream);
+                        
+                        // Add title
+                        doc.fontSize(20)
+                           .font('Helvetica-Bold')
+                           .text(filename.replace(/_/g, ' '), {
+                               align: 'center'
+                           });
+                        
+                        // Add timestamp
+                        doc.fontSize(10)
+                           .font('Helvetica-Oblique')
+                           .text(`Generated on: ${new Date().toLocaleString()}`, {
+                               align: 'center'
+                           });
+                        
+                        // Add divider
+                        doc.moveDown(1);
+                        doc.moveTo(50, doc.y)
+                           .lineTo(doc.page.width - 50, doc.y)
+                           .stroke();
+                        doc.moveDown(1);
+                        
+                        // Add content
+                        doc.fontSize(12)
+                           .font('Helvetica')
+                           .text(textToPDF, {
+                               align: 'left',
+                               lineGap: 5
+                           });
+                        
+                        // Add page numbers
+                        const totalPages = doc.bufferedPageRange().count;
+                        for (let i = 0; i < totalPages; i++) {
+                            doc.switchToPage(i);
+                            doc.fontSize(10)
+                               .text(`Page ${i + 1} of ${totalPages}`, 
+                                     50, 
+                                     doc.page.height - 50, 
+                                     { align: 'center' });
+                        }
+                        
+                        // Add footer with bot name
+                        doc.fontSize(8)
+                           .font('Helvetica-Oblique')
+                           .text('Generated by Pet WhatsApp Bot', 
+                                 50, 
+                                 doc.page.height - 35, 
+                                 { align: 'center' });
+                        
+                        // Finalize the PDF
+                        doc.end();
+                        
+                        // Wait for PDF to be fully written
+                        writeStream.on('finish', async () => {
+                            // Send the PDF
+                            await sock.sendMessage(from, { 
+                                document: fs.readFileSync(pdfPath),
+                                mimetype: 'application/pdf',
+                                fileName: `${filename}.pdf`,
+                                caption: styles.title('ᴘᴅғ ɢᴇɴᴇʀᴀᴛᴇᴅ') + '\n\n' +
+                                         styles.bullet(`Filename: ${filename}.pdf`) + '\n' +
+                                         styles.bullet(`Content: ${textToPDF.length} characters`) + '\n' +
+                                         styles.bullet(`Pages: ${totalPages}`) + '\n\n' +
+                                         styles.success + ' _PDF generated successfully_ ✓'
+                            }, { quoted: msg });
+                            logActivity('PDF', `PDF generated with filename: ${filename}.pdf`);
+                            
+                            // Clean up
+                            fs.unlinkSync(pdfPath);
+                            delete pdfConversionData[sender];
+                        });
+                    } catch (error) {
+                        console.error('PDF generation error:', error);
+                        logActivity('ERROR', `PDF generation error: ${error.message}`);
+                        await sock.sendMessage(from, { 
+                            text: styles.error + ' _Failed to generate PDF_\n\n_Please try again with a different text or filename_ ⚠️'
+                        }, { quoted: msg });
+                        delete pdfConversionData[sender];
+                    }
+                    break;
+
                 // Mobile Legends Stats
                 case 'ml':
                     if (args.length < 2) {
@@ -692,7 +1209,6 @@ async function connectToWhatsApp() {
                     
                 // TikTok Profile
                 case 'tt':
-                case 'tiktok':
                     if (args.length < 1) {
                         await sock.sendMessage(from, { text: styles.warn + ' _Format: .tt <username>_' }, { quoted: msg });
                         break;
@@ -1049,367 +1565,6 @@ async function connectToWhatsApp() {
                         await sock.sendMessage(from, { text: styles.error + ' _Failed to fetch transcript_\n\n_The service might be busy or the video doesn\'t have captions_ ⚠️' }, { quoted: msg });
                     }
                     break;
-    
-                // Downloader - TikTok & Instagram
-                case 'down':
-                    // Create buttons for selecting platform
-                    const buttons = [
-                        {buttonId: 'tiktok', buttonText: {displayText: 'TikTok'}, type: 1},
-                        {buttonId: 'instagram', buttonText: {displayText: 'Instagram'}, type: 1}
-                    ];
-                    
-                    const buttonMessage = {
-                        text: styles.title('ᴍᴇᴅɪᴀ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
-                              styles.subtitle('ᴄʜᴏᴏsᴇ ᴘʟᴀᴛғᴏʀᴍ') + '\n' +
-                              styles.bullet('_Select the platform to download from_'),
-                        footer: 'Choose an option ⬇️',
-                        buttons: buttons,
-                        headerType: 1
-                    };
-                    
-                    await sock.sendMessage(from, buttonMessage, { quoted: msg });
-                    logActivity('DOWN', `Downloader menu displayed for ${senderName}`);
-                    break;
-                
-                // TikTok Downloader
-                case 'tiktokdl':
-                case 'ttdl':
-                    if (args.length < 1) {
-                        await sock.sendMessage(from, { text: styles.warn + ' _Format: .tiktokdl [TikTok URL]_' }, { quoted: msg });
-                        break;
-                    }
-                    
-                    const ttUrl = args[0];
-                    
-                    // Validate TikTok URL
-                    if (!ttUrl.includes('tiktok.com/')) {
-                        await sock.sendMessage(from, { text: styles.error + ' _Invalid TikTok URL_\n\n_Please provide a valid TikTok link_ 🔍' }, { quoted: msg });
-                        break;
-                    }
-                    
-                    await sock.sendMessage(from, { text: styles.processing + '\n_Processing TikTok link..._' }, { quoted: msg });
-                    
-                    try {
-                        const ttResponse = await axios.get(`https://api.ryzendesu.vip/api/downloader/ttdl?url=${encodeURIComponent(ttUrl)}`);
-                        
-                        if (ttResponse.data && ttResponse.data.success && ttResponse.data.data && ttResponse.data.data.data) {
-                            const ttData = ttResponse.data.data.data;
-                            
-                            // Store data for button selection
-                            tempDownloadData[sender] = {
-                                type: 'tiktok',
-                                data: ttData
-                            };
-                            
-                            // Create buttons for selecting download type
-                            const downloadButtons = [
-                                {buttonId: 'ttvideo', buttonText: {displayText: 'Download Video HD'}, type: 1},
-                                {buttonId: 'ttaudio', buttonText: {displayText: 'Extract Audio'}, type: 1}
-                            ];
-                            
-                            const buttonMessage = {
-                                text: styles.title('ᴛɪᴋᴛᴏᴋ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
-                                      styles.subtitle('ᴠɪᴅᴇᴏ ɪɴғᴏʀᴍᴀᴛɪᴏɴ') + '\n' +
-                                      styles.bullet(`Title: ${ttData.title}`) + '\n' +
-                                      styles.bullet(`Creator: ${ttData.author.nickname}`) + '\n' +
-                                      styles.bullet(`Duration: ${ttData.duration} seconds`) + '\n\n' +
-                                      styles.subtitle('ᴄʜᴏᴏsᴇ ᴏᴘᴛɪᴏɴ') + '\n' +
-                                      styles.bullet('_Select what you want to download_'),
-                                footer: 'Choose an option ⬇️',
-                                buttons: downloadButtons,
-                                headerType: 1
-                            };
-                            
-                            await sock.sendMessage(from, buttonMessage, { quoted: msg });
-                            logActivity('DOWN', `TikTok link processed: ${ttUrl}`);
-                        } else {
-                            await sock.sendMessage(from, { text: styles.error + ' _Failed to process TikTok link_\n\n_The video might be private or deleted_ 🔍' }, { quoted: msg });
-                        }
-                    } catch (error) {
-                        console.error('TikTok processing error:', error);
-                        logActivity('ERROR', `TikTok processing error: ${error.message}`);
-                        await sock.sendMessage(from, { text: styles.error + ' _Failed to process TikTok link_\n\n_Server might be busy, please try again later_ ⚠️' }, { quoted: msg });
-                    }
-                    break;
-                
-                // Instagram Downloader
-                case 'instagram':
-                case 'ig':
-                case 'igdl':
-                    if (args.length < 1) {
-                        await sock.sendMessage(from, { text: styles.warn + ' _Format: .instagram [Instagram URL]_' }, { quoted: msg });
-                        break;
-                    }
-                    
-                    const igUrl = args[0];
-                    
-                    // Validate Instagram URL
-                    if (!igUrl.includes('instagram.com/')) {
-                        await sock.sendMessage(from, { text: styles.error + ' _Invalid Instagram URL_\n\n_Please provide a valid Instagram link_ 🔍' }, { quoted: msg });
-                        break;
-                    }
-                    
-                    await sock.sendMessage(from, { text: styles.processing + '\n_Processing Instagram link..._' }, { quoted: msg });
-                    
-                    try {
-                        const igResponse = await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(igUrl)}`);
-                        
-                        if (igResponse.data && igResponse.data.status && igResponse.data.data && igResponse.data.data.length > 0) {
-                            await sock.sendMessage(from, { text: styles.subtitle('ɪɴsᴛᴀɢʀᴀᴍ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' + 
-                                                          styles.bullet(`Found ${igResponse.data.data.length} media from post`) + '\n' +
-                                                          styles.bullet('_Downloading all media..._') }, { quoted: msg });
-                            
-                            // Download all media
-                            let counter = 0;
-                            for (const media of igResponse.data.data) {
-                                counter++;
-                                
-                                // Determine if it's a video or image by checking the URL
-                                const isVideo = media.url.includes('.mp4') || media.url.toLowerCase().includes('video');
-                                
-                                if (isVideo) {
-                                    await sock.sendMessage(from, { 
-                                        video: { url: media.url },
-                                        caption: styles.subtitle(`ɪɴsᴛᴀɢʀᴀᴍ ᴍᴇᴅɪᴀ ${counter}/${igResponse.data.data.length}`),
-                                        mimetype: 'video/mp4'
-                                    }, { quoted: msg });
-                                } else {
-                                    await sock.sendMessage(from, { 
-                                        image: { url: media.url },
-                                        caption: styles.subtitle(`ɪɴsᴛᴀɢʀᴀᴍ ᴍᴇᴅɪᴀ ${counter}/${igResponse.data.data.length}`)
-                                    }, { quoted: msg });
-                                }
-                                
-                                // Add a short delay between sending media to prevent rate limits
-                                await new Promise(resolve => setTimeout(resolve, 1000));
-                            }
-                            
-                            await sock.sendMessage(from, { 
-                                text: styles.success + ` _Successfully downloaded ${igResponse.data.data.length} media from Instagram post_ ✓`
-                            }, { quoted: msg });
-                            logActivity('DOWN', `Instagram media downloaded: ${igUrl}`);
-                        } else {
-                            await sock.sendMessage(from, { text: styles.error + ' _Failed to process Instagram link_\n\n_The post might be private or deleted_ 🔍' }, { quoted: msg });
-                        }
-                    } catch (error) {
-                        console.error('Instagram processing error:', error);
-                        logActivity('ERROR', `Instagram processing error: ${error.message}`);
-                        await sock.sendMessage(from, { text: styles.error + ' _Failed to process Instagram link_\n\n_Server might be busy, please try again later_ ⚠️' }, { quoted: msg });
-                    }
-                    break;
-                
-                // AI Image Generator
-                case 'create':
-                    if (args.length < 1) {
-                        await sock.sendMessage(from, { text: styles.warn + ' _Format: .create [prompt]_' }, { quoted: msg });
-                        break;
-                    }
-                    
-                    const createPrompt = args.join(' ');
-                    
-                    // Store prompt for later use with button selection
-                    tempImagePrompts[sender] = createPrompt;
-                    
-                    // Create buttons for selecting style
-                    const styleButtons = [
-                        {buttonId: 'style_soft', buttonText: {displayText: 'Soft-Anime'}, type: 1},
-                        {buttonId: 'style_vintage', buttonText: {displayText: 'Vintage-Anime'}, type: 1},
-                        {buttonId: 'style_waifu', buttonText: {displayText: 'Waifu'}, type: 1}
-                    ];
-                    
-                    const styleButtons2 = [
-                        {buttonId: 'style_anime', buttonText: {displayText: 'Anime'}, type: 1},
-                        {buttonId: 'style_ghibli', buttonText: {displayText: 'Studio-Ghibli'}, type: 1},
-                        {buttonId: 'style_cute', buttonText: {displayText: 'Cute-Anime'}, type: 1}
-                    ];
-                    
-                    // Send first set of buttons
-                    const buttonMessageStyle1 = {
-                        text: styles.title('ᴀɪ ɪᴍᴀɢᴇ ɢᴇɴᴇʀᴀᴛᴏʀ') + '\n\n' +
-                              styles.subtitle('ʏᴏᴜʀ ᴘʀᴏᴍᴘᴛ') + '\n' +
-                              styles.bullet(`"${createPrompt}"`) + '\n\n' +
-                              styles.subtitle('ᴄʜᴏᴏsᴇ sᴛʏʟᴇ (ᴘᴀɢᴇ 1/2)') + '\n' +
-                              styles.bullet('_Select an art style for your image_'),
-                        footer: 'Choose a style ⬇️',
-                        buttons: styleButtons,
-                        headerType: 1
-                    };
-                    
-                    await sock.sendMessage(from, buttonMessageStyle1, { quoted: msg });
-                    
-                    // Send second set of buttons
-                    setTimeout(async () => {
-                        const buttonMessageStyle2 = {
-                            text: styles.subtitle('ᴄʜᴏᴏsᴇ sᴛʏʟᴇ (ᴘᴀɢᴇ 2/2)') + '\n' +
-                                  styles.bullet('_Select an art style for your image_'),
-                            footer: 'Choose a style ⬇️',
-                            buttons: styleButtons2,
-                            headerType: 1
-                        };
-                        
-                        await sock.sendMessage(from, buttonMessageStyle2);
-                    }, 1000);
-                    
-                    logActivity('CREATE', `AI image prompt received: "${createPrompt.substring(0, 30)}..."`);
-                    break;
-                
-                // Text to PDF Converter
-                case 'topdf':
-                    // Make sure we're replying to a message
-                    if (!msg.message.extendedTextMessage || !msg.message.extendedTextMessage.contextInfo || !msg.message.extendedTextMessage.contextInfo.quotedMessage) {
-                        await sock.sendMessage(from, { 
-                            text: styles.warn + ' _Reply to a text message with .topdf command_\n\n' +
-                                  styles.bullet('_Example: .topdf_')
-                        }, { quoted: msg });
-                        break;
-                    }
-                    
-                    // Extract the text from the quoted message
-                    const quotedContent = msg.message.extendedTextMessage.contextInfo.quotedMessage;
-                    let textContent = '';
-                    
-                    if (quotedContent.conversation) {
-                        textContent = quotedContent.conversation;
-                    } else if (quotedContent.extendedTextMessage && quotedContent.extendedTextMessage.text) {
-                        textContent = quotedContent.extendedTextMessage.text;
-                    } else {
-                        await sock.sendMessage(from, { 
-                            text: styles.error + ' _The replied message must contain text_'
-                        }, { quoted: msg });
-                        break;
-                    }
-                    
-                    // Store the text content for later use
-                    pdfConversionData[sender] = textContent;
-                    
-                    // Ask for filename
-                    await sock.sendMessage(from, { 
-                        text: styles.title('ᴛᴇxᴛ ᴛᴏ ᴘᴅғ ᴄᴏɴᴠᴇʀᴛᴇʀ') + '\n\n' +
-                              styles.subtitle('ᴛᴇxᴛ ᴄᴀᴘᴛᴜʀᴇᴅ') + '\n' +
-                              styles.bullet(`${textContent.length} characters captured`) + '\n\n' +
-                              styles.subtitle('ғɪʟᴇɴᴀᴍᴇ') + '\n' +
-                              styles.bullet('_Reply with the filename you want (without .pdf extension)_') + '\n\n' +
-                              styles.bullet('_Format: .filename YourFileName_')
-                    }, { quoted: msg });
-                    logActivity('PDF', `Text to PDF conversion initiated by ${senderName}`);
-                    break;
-                
-                // Filename handler for PDF conversion
-                case 'filename':
-                    if (args.length < 1) {
-                        await sock.sendMessage(from, { 
-                            text: styles.warn + ' _Please provide a filename_\n\n' +
-                                  styles.bullet('_Format: .filename YourFileName_')
-                        }, { quoted: msg });
-                        break;
-                    }
-                    
-                    if (!pdfConversionData[sender]) {
-                        await sock.sendMessage(from, { 
-                            text: styles.error + ' _No text found for conversion_\n\n' +
-                                  styles.bullet('_First reply to a text message with .topdf command_')
-                        }, { quoted: msg });
-                        break;
-                    }
-                    
-                    const filename = args.join('_').replace(/[^a-zA-Z0-9_-]/g, '_');
-                    const textToPDF = pdfConversionData[sender];
-                    
-                    await sock.sendMessage(from, { 
-                        text: styles.processing + '\n_Creating PDF document..._'
-                    }, { quoted: msg });
-                    
-                    try {
-                        // Create PDF
-                        const pdfPath = `./temp/${filename}.pdf`;
-                        const doc = new PDFDocument({
-                            margin: 50,
-                            size: 'A4'
-                        });
-                        
-                        // Pipe PDF to file
-                        const writeStream = fs.createWriteStream(pdfPath);
-                        doc.pipe(writeStream);
-                        
-                        // Add title
-                        doc.fontSize(20)
-                           .font('Helvetica-Bold')
-                           .text(filename.replace(/_/g, ' '), {
-                               align: 'center'
-                           });
-                        
-                        // Add timestamp
-                        doc.fontSize(10)
-                           .font('Helvetica-Oblique')
-                           .text(`Generated on: ${new Date().toLocaleString()}`, {
-                               align: 'center'
-                           });
-                        
-                        // Add divider
-                        doc.moveDown(1);
-                        doc.moveTo(50, doc.y)
-                           .lineTo(doc.page.width - 50, doc.y)
-                           .stroke();
-                        doc.moveDown(1);
-                        
-                        // Add content
-                        doc.fontSize(12)
-                           .font('Helvetica')
-                           .text(textToPDF, {
-                               align: 'left',
-                               lineGap: 5
-                           });
-                        
-                        // Add page numbers
-                        const totalPages = doc.bufferedPageRange().count;
-                        for (let i = 0; i < totalPages; i++) {
-                            doc.switchToPage(i);
-                            doc.fontSize(10)
-                               .text(`Page ${i + 1} of ${totalPages}`, 
-                                     50, 
-                                     doc.page.height - 50, 
-                                     { align: 'center' });
-                        }
-                        
-                        // Add footer with bot name
-                        doc.fontSize(8)
-                           .font('Helvetica-Oblique')
-                           .text('Generated by Pet WhatsApp Bot', 
-                                 50, 
-                                 doc.page.height - 35, 
-                                 { align: 'center' });
-                        
-                        // Finalize the PDF
-                        doc.end();
-                        
-                        // Wait for PDF to be fully written
-                        writeStream.on('finish', async () => {
-                            // Send the PDF
-                            await sock.sendMessage(from, { 
-                                document: fs.readFileSync(pdfPath),
-                                mimetype: 'application/pdf',
-                                fileName: `${filename}.pdf`,
-                                caption: styles.title('ᴘᴅғ ɢᴇɴᴇʀᴀᴛᴇᴅ') + '\n\n' +
-                                         styles.bullet(`Filename: ${filename}.pdf`) + '\n' +
-                                         styles.bullet(`Content: ${textToPDF.length} characters`) + '\n' +
-                                         styles.bullet(`Pages: ${totalPages}`) + '\n\n' +
-                                         styles.success + ' _PDF generated successfully_ ✓'
-                            }, { quoted: msg });
-                            logActivity('PDF', `PDF generated with filename: ${filename}.pdf`);
-                            
-                            // Clean up
-                            fs.unlinkSync(pdfPath);
-                            delete pdfConversionData[sender];
-                        });
-                    } catch (error) {
-                        console.error('PDF generation error:', error);
-                        logActivity('ERROR', `PDF generation error: ${error.message}`);
-                        await sock.sendMessage(from, { 
-                            text: styles.error + ' _Failed to generate PDF_\n\n_Please try again with a different text or filename_ ⚠️'
-                        }, { quoted: msg });
-                        delete pdfConversionData[sender];
-                    }
-                    break;
 
                 // View Bot Logs
                 case 'logs':
@@ -1469,6 +1624,8 @@ async function connectToWhatsApp() {
                                    
                                    styles.section('𝗠𝗲𝗱𝗶𝗮 𝗧𝗼𝗼𝗹𝘀') + '\n' +
                                    styles.item('*.down* - Download TikTok/Instagram') + '\n' +
+                                   styles.item('*.ttdl <url>* - Download TikTok directly') + '\n' +
+                                   styles.item('*.igdl <url>* - Download Instagram directly') + '\n' +
                                    styles.item('*.topdf* - Convert text to PDF') + '\n' +
                                    styles.item('*.tr <url>* - Get YouTube transcript') + '\n\n' +
                                    
@@ -1531,189 +1688,16 @@ async function connectToWhatsApp() {
         }
     });
     
-    // Button response handler
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify' || !isBotReady()) return;
-        
-        const msg = messages[0];
-        if (!msg.message) return;
-        
-        // Handle button responses
-        if (msg.message.buttonsResponseMessage) {
-            const buttonId = msg.message.buttonsResponseMessage.selectedButtonId;
-            const from = msg.key.remoteJid;
-            const sender = msg.key.participant || from;
-            const senderName = msg.pushName || 'User';
-            
-            console.log(`Button pressed: ${buttonId} by ${senderName}`);
-            
-            try {
-                // Handle platform selection buttons
-                if (buttonId === 'tiktok') {
-                    await sock.sendMessage(from, { 
-                        text: styles.subtitle('ᴛɪᴋᴛᴏᴋ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
-                              styles.bullet('_Please send the TikTok video link_') + '\n\n' +
-                              styles.bullet('_Format: .ttdl [TikTok URL]_')
-                    }, { quoted: msg });
-                    logActivity('DOWN', `TikTok downloader selected by ${senderName}`);
-                }
-                
-                else if (buttonId === 'instagram') {
-                    await sock.sendMessage(from, { 
-                        text: styles.subtitle('ɪɴsᴛᴀɢʀᴀᴍ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ') + '\n\n' +
-                              styles.bullet('_Please send the Instagram post link_') + '\n\n' +
-                              styles.bullet('_Format: .igdl [Instagram URL]_')
-                    }, { quoted: msg });
-                    logActivity('DOWN', `Instagram downloader selected by ${senderName}`);
-                }
-                
-                // Handle TikTok download type buttons
-                else if (buttonId === 'ttvideo') {
-                    if (tempDownloadData[sender] && tempDownloadData[sender].type === 'tiktok') {
-                        const data = tempDownloadData[sender].data;
-                        await sock.sendMessage(from, { text: styles.processing + '\n_Downloading HD video..._' }, { quoted: msg });
-                        
-                        try {
-                            await sock.sendMessage(from, { 
-                                video: { url: data.hdplay },
-                                caption: styles.title('ᴛɪᴋᴛᴏᴋ ᴠɪᴅᴇᴏ') + '\n\n' +
-                                        styles.subtitle(data.title) + '\n\n' +
-                                        styles.bullet(`👤 Creator: ${data.author.nickname}`) + '\n' +
-                                        styles.bullet(`👁️ Views: ${data.play_count.toLocaleString()}`) + '\n' +
-                                        styles.bullet(`❤️ Likes: ${data.digg_count.toLocaleString()}`) + '\n\n' +
-                                        '_Download completed successfully_ ✓',
-                                mimetype: 'video/mp4'
-                            }, { quoted: msg });
-                            logActivity('DOWN', `TikTok video downloaded for ${senderName}`);
-                            
-                            // Clear temp data
-                            delete tempDownloadData[sender];
-                        } catch (error) {
-                            console.error('TikTok video download error:', error);
-                            logActivity('ERROR', `TikTok download error: ${error.message}`);
-                            await sock.sendMessage(from, { 
-                                text: styles.error + ' _Failed to download video_\n\n_Please try again later_ ⚠️' 
-                            }, { quoted: msg });
-                        }
-                    }
-                }
-                
-                // Audio selection for TikTok
-                else if (buttonId === 'ttaudio') {
-                    if (tempDownloadData[sender] && tempDownloadData[sender].type === 'tiktok') {
-                        const data = tempDownloadData[sender].data;
-                        await sock.sendMessage(from, { text: styles.processing + '\n_Extracting audio..._' }, { quoted: msg });
-                        
-                        try {
-                            // If there are images, send them as slideshow with audio
-                            if (data.images && data.images.length > 0) {
-                                for (const image of data.images) {
-                                    await sock.sendMessage(from, { 
-                                        image: { url: image.url },
-                                        caption: styles.title('ᴛɪᴋᴛᴏᴋ ɪᴍᴀɢᴇ')
-                                    }, { quoted: msg });
-                                }
-                                
-                                await sock.sendMessage(from, { 
-                                    audio: { url: data.music },
-                                    mimetype: 'audio/mp4',
-                                    ptt: false
-                                }, { quoted: msg });
-                            } else {
-                                // Just send the audio
-                                await sock.sendMessage(from, { 
-                                    audio: { url: data.music },
-                                    mimetype: 'audio/mp4',
-                                    ptt: false
-                                }, { quoted: msg });
-                            }
-                            
-                            await sock.sendMessage(from, { 
-                                text: styles.title('ᴛɪᴋᴛᴏᴋ ᴀᴜᴅɪᴏ') + '\n\n' +
-                                      styles.subtitle(data.music_info.title) + '\n\n' +
-                                      styles.bullet(`👤 Creator: ${data.music_info.author}`) + '\n' +
-                                      styles.bullet(`🎵 Original: ${data.music_info.original ? 'Yes' : 'No'}`) + '\n\n' +
-                                      '_Audio extraction completed successfully_ ✓'
-                            }, { quoted: msg });
-                            logActivity('DOWN', `TikTok audio downloaded for ${senderName}`);
-                            
-                            // Clear temp data
-                            delete tempDownloadData[sender];
-                        } catch (error) {
-                            console.error('TikTok audio download error:', error);
-                            logActivity('ERROR', `TikTok audio download error: ${error.message}`);
-                            await sock.sendMessage(from, { 
-                                text: styles.error + ' _Failed to extract audio_\n\n_Please try again later_ ⚠️' 
-                            }, { quoted: msg });
-                        }
-                    }
-                }
-                
-                // Handle image style selection buttons
-                else if (buttonId.startsWith('style_') && tempImagePrompts[sender]) {
-                    const styleMap = {
-                        'style_soft': 'Soft-Anime',
-                        'style_vintage': 'Vintage-Anime',
-                        'style_waifu': 'Waifu',
-                        'style_anime': 'Anime',
-                        'style_ghibli': 'Studio-Ghibli',
-                        'style_cute': 'Cute-Anime'
-                    };
-                    
-                    const selectedStyle = styleMap[buttonId];
-                    const prompt = tempImagePrompts[sender];
-                    
-                    await sock.sendMessage(from, { 
-                        text: styles.processing + '\n_Generating AI image with style: ' + selectedStyle + '..._\n\n' +
-                              styles.bullet('_This might take up to 30 seconds_')
-                    }, { quoted: msg });
-                    
-                    try {
-                        const imageResponse = await axios.get(`https://api.ryzendesu.vip/api/ai/waifu-diff?prompt=${encodeURIComponent(prompt)}&style=${encodeURIComponent(selectedStyle)}`, {
-                            responseType: 'arraybuffer'
-                        });
-                        
-                        // Create a unique filename to avoid conflicts
-                        const imagePath = `./temp/img_${sender.split('@')[0]}_${Date.now()}.png`;
-                        
-                        // Save image temporarily
-                        fs.writeFileSync(imagePath, Buffer.from(imageResponse.data));
-                        
-                        // Send the image
-                        await sock.sendMessage(from, { 
-                            image: { url: imagePath },
-                            caption: styles.title('ᴀɪ ɢᴇɴᴇʀᴀᴛᴇᴅ ɪᴍᴀɢᴇ') + '\n\n' +
-                                     styles.subtitle('ᴘʀᴏᴍᴘᴛ') + '\n' +
-                                     styles.bullet(`"${prompt}"`) + '\n\n' +
-                                     styles.subtitle('sᴛʏʟᴇ') + '\n' +
-                                     styles.bullet(`${selectedStyle}`) + '\n\n' +
-                                     styles.success + ' _Image generated successfully_ ✨'
-                        }, { quoted: msg });
-                        logActivity('CREATE', `AI image generated with style: ${selectedStyle}`);
-                        
-                        // Clean up
-                        fs.unlinkSync(imagePath);
-                        delete tempImagePrompts[sender];
-                    } catch (error) {
-                        console.error('AI image generation error:', error);
-                        logActivity('ERROR', `AI image generation error: ${error.message}`);
-                        await sock.sendMessage(from, { 
-                            text: styles.error + ' _Failed to generate image_\n\n_The AI service might be busy or the prompt contains prohibited content. Please try again with a different prompt._ 🎨' 
-                        }, { quoted: msg });
-                        delete tempImagePrompts[sender];
-                    }
-                }
-            } catch (error) {
-                console.error('Button handling error:', error);
-                logActivity('ERROR', `Button handling error: ${error.message}`);
-                
-                // Send a generic error message
-                await sock.sendMessage(from, { 
-                    text: styles.error + ' _An error occurred while processing your selection_\n\n_Please try again later_ ⚠️' 
-                }, { quoted: msg });
+    // Cleanup for pending actions (to prevent memory leaks)
+    setInterval(() => {
+        const now = Date.now();
+        // Remove actions older than 5 minutes
+        Object.keys(pendingActions).forEach(user => {
+            if (pendingActions[user].timestamp && now - pendingActions[user].timestamp > 5 * 60 * 1000) {
+                delete pendingActions[user];
             }
-        }
-    });
+        });
+    }, 60000); // Run cleanup every minute
     
     return sock;
 }
